@@ -3,8 +3,8 @@
 # (adapted from the Combat Arena workflow)
 # ============================================================
 # Branch -> channel:
-#   dev           -> dev  channel  (https://speed-football-scape.dev.play.bloxity.io)
-#   main / master -> prod channel  (https://speed-football-scape.play.bloxity.io)
+#   dev           -> dev  channel  (https://speed-football-escape.dev.play.bloxity.io)
+#   main / master -> prod channel  (https://speed-football-escape.play.bloxity.io)
 #
 # Repo secrets required (Settings -> Secrets and variables -> Actions):
 #   LEGION_DEPLOY_TOKEN   the deploy token from hosting.bloxity.io
@@ -37,7 +37,7 @@ permissions:
 env:
   # Must match the app id on hosting.bloxity.io. The client is built against it
   # and finds its server through the Bloxity matchmaker / <id>.host.bloxity.io.
-  GAME_ID: speed-football-scape
+  GAME_ID: speed-football-escape
   # GHCR account the server image is published under (owner of GHCR_PUSH_TOKEN)
   IMAGE_OWNER: asivixlp44-cmyk
   IMAGE_NAME: speed-football-scape-server
