@@ -1,0 +1,13 @@
+**/node_modules
+client
+web
+src
+reference
+Lib
+Scripts
+server/data
+server/run.log
+*.rbxl
+*.rbxlx
+.git
+.github

@@ -5,7 +5,8 @@
 
 import { SKUS, PRODUCTS, PASSES } from '../../shared/config.js';
 
-export const GAME_SLUG = 'speed-football-scape';
+// Catalogue slug on bloxity.io (Bux pricing, invites); defaults to the hosting id
+export const GAME_SLUG = import.meta.env.VITE_BLOXITY_GAME_SLUG || import.meta.env.VITE_BLOXITY_GAME_ID || 'speed-football-scape';
 
 const sdk = () => (window.Legion && window.Legion.SDK) || null;
 const has = (path) => {
@@ -87,6 +88,19 @@ export const gameplayStart = () => call('game.gameplayStart');
 export const updateRoom = (roomId) => call('game.updateRoom', roomId || '');
 export const playerJoined = (name) => call('game.playerJoined', name);
 export const playerInRoom = (name) => call('game.playerInRoom', name);
+
+// ----- multiplayer matchmaker (Bloxity hosting) -----
+// Resolves { endpoint, roomId, cold }, or null when the SDK/matchmaker isn't reachable
+export async function resolveEndpoint(gameId) {
+    if (!has('net.resolveEndpoint')) return null;
+    try {
+        const u = bloxity.user;
+        return (await call('net.resolveEndpoint', gameId, u ? { userId: u._id } : {})) || null;
+    } catch (e) {
+        console.warn('[Bloxity] matchmaker', e);
+        return null;
+    }
+}
 
 // ----- portal -----
 export const showPortalMenu = () => call('portal.showMenu', false);

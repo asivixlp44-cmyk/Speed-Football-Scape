@@ -370,8 +370,18 @@ function syncRemotes(dt, t) {
 // =====================================================================================
 // Networking
 // =====================================================================================
+// Hosted on Bloxity (VITE_BLOXITY_GAME_ID set at build time): the client is served from
+// <id>.play.bloxity.io and the server pods are found through the Bloxity matchmaker.
+const BLOXITY_GAME_ID = import.meta.env.VITE_BLOXITY_GAME_ID || '';
 const SERVER_URL = import.meta.env.VITE_SERVER_URL
-    || (import.meta.env.DEV ? `${location.protocol}//${location.hostname}:2567` : location.origin);
+    || (BLOXITY_GAME_ID ? `https://${BLOXITY_GAME_ID}.host.bloxity.io`
+        : import.meta.env.DEV ? `${location.protocol}//${location.hostname}:2567` : location.origin);
+async function serverEndpoint() {
+    if (!BLOXITY_GAME_ID) return SERVER_URL;
+    const r = await BX.resolveEndpoint(BLOXITY_GAME_ID);
+    if (r && r.cold) $('#loading').textContent = 'Waking up a server…';
+    return (r && r.endpoint) || SERVER_URL;
+}
 let lastMoveSent = 0, lastMoveKey = '';
 function sendMove(force) {
     const now = performance.now();
@@ -396,7 +406,7 @@ function playerUid() {
 }
 
 async function connect(name) {
-    const client = new Client(SERVER_URL);
+    const client = new Client(await serverEndpoint());
     const id = BX.identity();
     const room = await client.joinOrCreate('speed', {
         uid: playerUid(), name: name || id.name, token: id.token, av: packAvatar(BX.currentAvatar()),
