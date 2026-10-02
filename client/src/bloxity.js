@@ -91,11 +91,16 @@ export const playerInRoom = (name) => call('game.playerInRoom', name);
 
 // ----- multiplayer matchmaker (Bloxity hosting) -----
 // Resolves { endpoint, roomId, cold }, or null when the SDK/matchmaker isn't reachable
-export async function resolveEndpoint(gameId) {
+export async function resolveEndpoint(gameId, version) {
     if (!has('net.resolveEndpoint')) return null;
     try {
         const u = bloxity.user;
-        return (await call('net.resolveEndpoint', gameId, u ? { userId: u._id } : {})) || null;
+        const opts = {};
+        if (u) opts.userId = u._id;
+        if (version) opts.version = version;
+        const r = (await call('net.resolveEndpoint', gameId, opts)) || null;
+        console.info('[Bloxity] matchmaker', JSON.stringify(r));
+        return r;
     } catch (e) {
         console.warn('[Bloxity] matchmaker', e);
         return null;
