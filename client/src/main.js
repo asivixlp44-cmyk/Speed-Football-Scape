@@ -376,11 +376,13 @@ const BLOXITY_GAME_ID = import.meta.env.VITE_BLOXITY_GAME_ID || '';
 const SERVER_URL = import.meta.env.VITE_SERVER_URL
     || (BLOXITY_GAME_ID ? `https://${BLOXITY_GAME_ID}.host.bloxity.io`
         : import.meta.env.DEV ? `${location.protocol}//${location.hostname}:2567` : location.origin);
+let lastEndpoint = '';
 async function serverEndpoint() {
-    if (!BLOXITY_GAME_ID) return SERVER_URL;
+    if (!BLOXITY_GAME_ID) { lastEndpoint = SERVER_URL; return SERVER_URL; }
     const r = await BX.resolveEndpoint(BLOXITY_GAME_ID);
     if (r && r.cold) $('#loading').textContent = 'Waking up a server…';
-    return (r && r.endpoint) || SERVER_URL;
+    lastEndpoint = (r && r.endpoint) || SERVER_URL;
+    return lastEndpoint;
 }
 let lastMoveSent = 0, lastMoveKey = '';
 function sendMove(force) {
@@ -893,6 +895,11 @@ async function play() {
         $('#loading').hidden = true;
         err.hidden = false;
         err.textContent = 'Could not reach the game server. Check your connection and try again.';
+        // Technical detail for debugging hosted deploys
+        const det = document.createElement('div');
+        det.style.cssText = 'font-size:0.8rem;opacity:0.75;margin-top:0.4rem;word-break:break-all';
+        det.textContent = (lastEndpoint ? lastEndpoint + ' · ' : '') + ((e && (e.message || e.code)) || String(e));
+        err.appendChild(det);
         retry.hidden = false;
         BX.loadingEnd();
         return;
