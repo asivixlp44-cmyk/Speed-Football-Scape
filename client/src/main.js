@@ -29,6 +29,7 @@ const P = {
     dead: false, shield: 0, stamina: CFG.staminaMax, staminaIdle: 0, sprinting: false,
     lastSafe: SPAWN.clone(), safeTimer: 0, stage: -1, moving: false, animPhase: 0, lockToastT: -9,
     squash: 1, squashV: 0, airTime: 0, lastStep: 0,
+    hv: new V3(), coyote: 0, jumpBuf: 0, lean: 0, bank: 0, lastFacing: 0, lockedTread: null,
 };
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 let shake = 0;
@@ -139,8 +140,14 @@ function walkSpeed() {
     return s;
 }
 
+function fadeIn() {
+    const f = $('#fade');
+    if (!f) return;
+    f.classList.remove('go'); void f.offsetWidth; f.classList.add('go');
+}
 function teleport(pos, yaw) {
-    P.pos.copy(pos); P.vel.set(0, 0, 0); P.push.set(0, 0, 0);
+    if (running && P.pos.distanceToSquared(pos) > 400) fadeIn();
+    P.pos.copy(pos); P.vel.set(0, 0, 0); P.push.set(0, 0, 0); P.hv.set(0, 0, 0);
     P.lastSafe.copy(pos);
     P.facing = yaw || 0; cam.yaw = (yaw || 0) + Math.PI;
     if (follower) follower.position.copy(pos).add(new V3(3, 0, -3));
@@ -465,7 +472,8 @@ addEventListener('keydown', (e) => {
     if (e.code === 'Space' || e.code.startsWith('Arrow')) e.preventDefault();
     if (e.code === 'KeyE' && running) usePrompt();
     if (e.code === 'Escape') {
-        if (!$('#modal').hidden) closeModal();
+        if (!$('#buy').hidden) $('#buyCancel').click();
+        else if (!$('#modal').hidden) closeModal();
         else if (running && BX.isEmbedded()) BX.showPortalMenu();
     }
 });
@@ -540,7 +548,11 @@ function updateCamera(dt) {
         baseFov = camera.fov;
         return;
     }
-    cam.target.lerp(camGoal.set(P.pos.x, P.pos.y + 4.5, P.pos.z), 1 - Math.exp(-dt * 18));
+    const kxz = 1 - Math.exp(-dt * 18), ky = 1 - Math.exp(-dt * (P.onGround ? 10 : 5));
+    camGoal.set(P.pos.x, P.pos.y + 4.5, P.pos.z);
+    cam.target.x += (camGoal.x - cam.target.x) * kxz; cam.target.z += (camGoal.z - cam.target.z) * kxz;
+    cam.target.y += (camGoal.y - cam.target.y) * ky;
+    if (Math.abs(camGoal.y - cam.target.y) > 30) cam.target.y = camGoal.y;
     const cp = Math.cos(cam.pitch);
     camDir.set(Math.sin(cam.yaw) * cp, Math.sin(cam.pitch), Math.cos(cam.yaw) * cp);
     const dist = Math.max(3, rayHit(cam.target, camDir, cam.dist) - 0.8);
@@ -685,13 +697,20 @@ function update(dt) {
 
     if (!P.dead) {
         const ws = walkSpeed();
-        if ((keys.Space || touchJump || pad.jump) && P.onGround) {
+        // Coyote time: still jump just after running off an edge. Buffer: a jump pressed just before landing counts.
+        P.coyote = P.onGround ? 0.12 : P.coyote - dt;
+        P.jumpBuf = (keys.Space || touchJump || pad.jump) ? 0.15 : P.jumpBuf - dt;
+        if (P.jumpBuf > 0 && P.coyote > 0 && P.vel.y <= 1) {
+            P.jumpBuf = 0; P.coyote = 0;
             P.vel.y = JUMP_V; P.onGround = false;
             sfx('jump'); P.squashV += 5; dust(P.pos, 4, 0.6);
         }
         P.vel.y -= GRAV * dt;
         P.push.multiplyScalar(Math.exp(-(P.onGround ? 4 : 1.2) * dt));
-        let vx = mv.x * ws + P.push.x, vz = mv.z * ws + P.push.z;
+        // Ease toward the target speed: quick on the ground, floatier in the air
+        const accel = P.onGround ? (P.moving ? 14 : 20) : 6;
+        P.hv.lerp(tmpF.set(mv.x * ws, 0, mv.z * ws), 1 - Math.exp(-accel * dt));
+        let vx = P.hv.x + P.push.x, vz = P.hv.z + P.push.z;
         if (P.onGround && P.ground && P.ground.belt) { vx += P.ground.belt.x; vz += P.ground.belt.z; }
         const dist = Math.max(Math.abs(vx), Math.abs(vz), Math.abs(P.vel.y)) * dt;
         const n = Math.max(1, Math.ceil(dist / 0.6));
@@ -750,9 +769,11 @@ function update(dt) {
 
         // Locked treadmill: offer the pass / explain the requirement
         const tread = P.onGround && P.ground && P.ground.tread;
-        if (tread && P.moving && treadLocked(tread) && t - P.lockToastT > 3) {
-            P.lockToastT = t;
-            if (tread.pass) buy('pass', tread.pass); else toast('Need ' + tread.req + ' Wins for this treadmill!', '#ff5a5a');
+        if (tread !== P.lockedTread && (P.onGround || !tread)) {
+            P.lockedTread = tread || null;
+            if (tread && treadLocked(tread)) {
+                if (tread.pass) buy('pass', tread.pass); else toast('Need ' + tread.req + ' Wins for this treadmill!', '#ff5a5a');
+            }
         }
     }
 
@@ -775,7 +796,16 @@ function update(dt) {
     online = syncRemotes(dt, t);
 
     rig.position.copy(P.pos);
+    rig.rotation.order = 'YXZ';
     rig.rotation.y = P.facing;
+    if (!reduceMotion) {
+        const spd = Math.hypot(P.hv.x, P.hv.z);
+        const turn = lerpAngle(0, P.facing - P.lastFacing, 1) / Math.max(dt, 1e-3);
+        P.lean += (Math.min(0.16, spd * 0.0022) * (P.onGround ? 1 : 0.4) - P.lean) * Math.min(1, dt * 8);
+        P.bank += (clamp(-turn * 0.035 * Math.min(1, spd / 30), -0.18, 0.18) - P.bank) * Math.min(1, dt * 8);
+        rig.rotation.x = P.lean; rig.rotation.z = P.bank;
+    }
+    P.lastFacing = P.facing;
     const hs = P.moving ? walkSpeed() : 0;
     P.animPhase += dt * (P.onGround ? Math.min(18, 4 + hs * 0.2) : 0);
     if (P.onGround) animRig(rig, P.animPhase, P.moving ? 0.9 : 0); else airPose(rig);
