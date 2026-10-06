@@ -384,9 +384,23 @@ let lastEndpoint = '';
 async function serverEndpoint() {
     if (!BLOXITY_GAME_ID) { lastEndpoint = SERVER_URL; return SERVER_URL; }
     const r = await BX.resolveEndpoint(BLOXITY_GAME_ID, DEV_CHANNEL ? 'preview' : undefined);
-    if (r && r.cold) $('#loading').textContent = 'Waking up a server…';
     lastEndpoint = (r && r.endpoint) || SERVER_URL;
+    // A scaled-to-zero server takes a while to boot: wait until it answers before joining
+    if (!(await serverUp(lastEndpoint))) {
+        $('#loading').textContent = 'Waking up a server…';
+        const until = Date.now() + 60000;
+        while (Date.now() < until && !(await serverUp(lastEndpoint))) await new Promise((res) => setTimeout(res, 2000));
+    }
     return lastEndpoint;
+}
+async function serverUp(url) {
+    try {
+        const ctl = new AbortController();
+        const t = setTimeout(() => ctl.abort(), 4000);
+        const r = await fetch(url.replace(/\/$/, '') + '/health', { signal: ctl.signal, cache: 'no-store' });
+        clearTimeout(t);
+        return r.ok;
+    } catch (e) { return false; }
 }
 let lastMoveSent = 0, lastMoveKey = '';
 function sendMove(force) {
