@@ -58,6 +58,9 @@ export function updateHud(P, online) {
     if (boostLeft > 0) el.boost.textContent = '⚡ x' + CFG.boostMult + ' SPEED BOOST ' + clock(boostLeft);
     const mins = (net.now() - S.joinedAt) / 60000;
     el.freeBadge.hidden = !FREE.some((r, i) => mins >= r.min && !S.freeClaimed[i]);
+    // Countdown to the next gift keeps players around for it
+    const next = FREE.find((r, i) => mins < r.min && !S.freeClaimed[i]);
+    $('#freeLb').textContent = el.freeBadge.hidden && next ? clock((next.min - mins) * 60) : 'FREE';
     updateOffer();
     if (!$('#modal').hidden && modalKind === 'free') renderFree();
 }

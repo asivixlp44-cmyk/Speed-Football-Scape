@@ -17,7 +17,7 @@ import {
     refreshModal, promptEl, promptTxtEl, showGoal, animateCounters,
 } from './ui.js';
 import {
-    CFG, STAGES, soccerById, auraById, KITS, SKINS, maxSpeedFor, fmt, clamp,
+    CFG, STAGES, TREADMILLS, TREAD_GEO, soccerById, auraById, KITS, SKINS, maxSpeedFor, fmt, clamp,
 } from '../../shared/config.js';
 
 // =====================================================================================
@@ -156,6 +156,20 @@ function teleport(pos, yaw) {
     sendMove(true);
 }
 function teleportLobby() { P.stage = -1; teleport(SPAWN, 0); }
+
+// Auto Train: stand on the best unlocked treadmill and keep running while AFK
+let autoTrain = false;
+function setAutoTrain(on) {
+    autoTrain = on;
+    $('#btnAuto').classList.toggle('on', on);
+    if (!on) return;
+    let best = -1;
+    TREADMILLS.forEach((d, i) => { if (!treadLocked(d) && (best < 0 || d.mult > TREADMILLS[best].mult)) best = i; });
+    P.stage = -1;
+    teleport(new V3(TREAD_GEO.cx, TREAD_GEO.top + 0.7, TREAD_GEO.z0 + best * TREAD_GEO.step), Math.PI / 2);
+    toast('Auto Train ON - x' + TREADMILLS[best].mult + ' treadmill', '#c28cff');
+}
+$('#btnAuto').addEventListener('click', () => { if (running) setAutoTrain(!autoTrain); });
 
 function die() {
     if (P.dead || P.shield > 0) return;
@@ -718,7 +732,11 @@ function update(dt) {
     mv.set(0, 0, 0).addScaledVector(tmpF, f).addScaledVector(tmpR, r);
     if (mv.lengthSq() > 1) mv.normalize();
     if (P.dead) mv.set(0, 0, 0);
-    P.moving = mv.lengthSq() > 0.01;
+    // Any movement input hands control back to the player
+    if (autoTrain && (f || r)) { setAutoTrain(false); toast('Auto Train OFF', '#c28cff'); }
+    const tread = P.onGround && P.ground && P.ground.tread;
+    const training = autoTrain && !P.dead && tread && !treadLocked(tread);
+    P.moving = mv.lengthSq() > 0.01 || !!training;
 
     const wantSprint = keys.ShiftLeft || keys.ShiftRight || touchSprint || pad.sprint;
     P.sprinting = wantSprint && P.moving && P.stamina > 0;
@@ -741,7 +759,7 @@ function update(dt) {
         const accel = P.onGround ? (P.moving ? 14 : 20) : 6;
         P.hv.lerp(tmpF.set(mv.x * ws, 0, mv.z * ws), 1 - Math.exp(-accel * dt));
         let vx = P.hv.x + P.push.x, vz = P.hv.z + P.push.z;
-        if (P.onGround && P.ground && P.ground.belt) { vx += P.ground.belt.x; vz += P.ground.belt.z; }
+        if (P.onGround && P.ground && P.ground.belt && !training) { vx += P.ground.belt.x; vz += P.ground.belt.z; }
         const dist = Math.max(Math.abs(vx), Math.abs(vz), Math.abs(P.vel.y)) * dt;
         const n = Math.max(1, Math.ceil(dist / 0.6));
         const sdt = dt / n;
@@ -767,7 +785,8 @@ function update(dt) {
             }
             P.airTime = 0;
         } else P.airTime += dt;
-        if (P.moving) P.facing = lerpAngle(P.facing, Math.atan2(mv.x, mv.z), 1 - Math.exp(-dt * 14));
+        if (training) P.facing = lerpAngle(P.facing, Math.PI / 2, 1 - Math.exp(-dt * 14));
+        else if (P.moving) P.facing = lerpAngle(P.facing, Math.atan2(mv.x, mv.z), 1 - Math.exp(-dt * 14));
 
         if (P.shield > 0) P.shield -= dt;
         if (P.pos.y < CFG.voidY) { P.shield = 0; die(); }
