@@ -890,7 +890,16 @@ async function play() {
     try {
         await waitForLogin(1500);
         const saved = (storageGet('sfs_name') || '').slice(0, 20);
-        const room = await connect(BX.identity().loggedIn ? '' : saved);
+        // A hosted server can be asleep or still starting: retry a few times before giving up
+        let room = null;
+        for (let attempt = 0; !room; attempt++) {
+            try { room = await connect(BX.identity().loggedIn ? '' : saved); } catch (e) {
+                if (attempt >= 4) throw e;
+                console.warn('[join] attempt', attempt + 1, 'failed:', e && e.message);
+                $('#loading').textContent = 'Waking up a server…';
+                await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+            }
+        }
         const me = room.state.players && room.state.players.get(room.sessionId);
         S.name = me ? me.name : S.name;
     } catch (e) {
