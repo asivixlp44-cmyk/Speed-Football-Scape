@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 export const T = THREE;
 export const V3 = THREE.Vector3;
@@ -18,7 +17,8 @@ const FOG = 0x3a3150;
 scene.background = new T.Color(FOG);
 scene.fog = new T.Fog(FOG, 170, 460);
 
-export const camera = new T.PerspectiveCamera(70, 1, 0.3, 700);
+// nothing past the fog is drawn: it would only be fog-coloured anyway
+export const camera = new T.PerspectiveCamera(70, 1, 0.3, 480);
 function resize() {
     const w = innerWidth, h = innerHeight;
     renderer.setSize(w, h, false);
@@ -29,20 +29,20 @@ function resize() {
 addEventListener('resize', resize);
 resize();
 
-// Lit surfaces stay below 1.0 in the linear buffer so only HDR neon blooms;
-// toneMappingExposure (fx.js) brings the overall brightness back up.
-scene.add(new T.HemisphereLight(0xffffff, 0x6a5f80, 1.6));
+// Lit like Bloxity's top games: sky / ground fill, a little ambient and the sun, no tone mapping
+scene.add(new T.HemisphereLight(0xe8f4ff, 0x6a5f80, 1.1));
 scene.add(new T.AmbientLight(0xffffff, 0.45));
-export const sun = new T.DirectionalLight(0xffffff, 1.2);
+export const sun = new T.DirectionalLight(0xfff3e0, 1.5);
 sun.castShadow = true;
 sun.shadow.mapSize.set(1024, 1024);
 Object.assign(sun.shadow.camera, { left: -45, right: 45, top: 45, bottom: -45, near: 1, far: 220 });
-sun.shadow.bias = -0.0015;
+sun.shadow.bias = -0.0008;
 scene.add(sun, sun.target);
 
 // ----- materials & textures -----
 export const UNIT = new T.BoxGeometry(1, 1, 1);
-export const NEON_BOOST = 1.3;
+// neon stays at its own colour (no bloom pass to feed)
+export const NEON_BOOST = 1;
 const matCache = new Map();
 export function mat(color, o) {
     o = o || {};
@@ -50,7 +50,6 @@ export function mat(color, o) {
     let m = matCache.get(key);
     if (!m) {
         m = o.neon ? new T.MeshBasicMaterial({ color }) : new T.MeshLambertMaterial({ color });
-        // Neon is HDR (brighter than 1) so the bloom pass picks it up
         if (o.neon) m.color.multiplyScalar(NEON_BOOST);
         if (o.opacity && o.opacity < 1) { m.transparent = true; m.opacity = o.opacity; m.depthWrite = false; }
         matCache.set(key, m);
@@ -391,7 +390,7 @@ export function updateAuraFx(fx, aura, t) {
 // stitched seams baked into a colour map and a "pillow" normal map. Textures follow
 // SphereGeometry's own UV layout so the panels are not distorted.
 const ballMaps = (() => {
-    const W = 1024, H = 512;
+    const W = 512, H = 256;
     const phi = (1 + Math.sqrt(5)) / 2;
     const ico = [[0, 1, phi], [0, -1, phi], [0, 1, -phi], [0, -1, -phi], [1, phi, 0], [-1, phi, 0], [1, -phi, 0], [-1, -phi, 0], [phi, 0, 1], [-phi, 0, 1], [phi, 0, -1], [-phi, 0, -1]];
     const norm = (v) => { const l = Math.hypot(v[0], v[1], v[2]); return [v[0] / l, v[1] / l, v[2] / l]; };
@@ -435,35 +434,14 @@ const ballMaps = (() => {
         }
     }
     cx.putImageData(img, 0, 0);
-    const nCan = document.createElement('canvas'); nCan.width = W; nCan.height = H;
-    const nx = nCan.getContext('2d');
-    const nImg = nx.createImageData(W, H), np = nImg.data;
-    const S = 3.2;
-    for (let y = 0; y < H; y++) {
-        for (let x = 0; x < W; x++) {
-            const hL = height[y * W + ((x - 1 + W) % W)], hR = height[y * W + ((x + 1) % W)];
-            const hU = height[Math.max(0, y - 1) * W + x], hD = height[Math.min(H - 1, y + 1) * W + x];
-            let ux = (hL - hR) * S, uy = (hD - hU) * S, uz = 1;
-            const l = Math.hypot(ux, uy, uz);
-            const i4 = (y * W + x) * 4;
-            np[i4] = (ux / l * 0.5 + 0.5) * 255; np[i4 + 1] = (uy / l * 0.5 + 0.5) * 255; np[i4 + 2] = (uz / l * 0.5 + 0.5) * 255; np[i4 + 3] = 255;
-        }
-    }
-    nx.putImageData(nImg, 0, 0);
     const map = texFrom(cCan);
     map.anisotropy = renderer.capabilities.getMaxAnisotropy();
-    const normalMap = new T.CanvasTexture(nCan);
-    normalMap.anisotropy = map.anisotropy;
-    return { map, normalMap };
+    return { map };
 })();
-// Soft studio reflections so the leather reads as glossy
-const ballEnv = new T.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
-const BALL_GEO = new T.SphereGeometry(1, 48, 32);
-const BALL_MAT = new T.MeshPhysicalMaterial({
-    map: ballMaps.map, normalMap: ballMaps.normalMap, normalScale: new T.Vector2(0.9, 0.9),
-    roughness: 0.55, metalness: 0, clearcoat: 0.45, clearcoatRoughness: 0.3,
-    envMap: ballEnv, envMapIntensity: 0.35,
-});
+// Matte like the rest of the world: no reflections or environment map (they cost a blur pass at
+// start-up and a heavy shader on every ball)
+const BALL_GEO = new T.SphereGeometry(1, 24, 16);
+const BALL_MAT = new T.MeshLambertMaterial({ map: ballMaps.map });
 export function football(d, parent) {
     const m = new T.Mesh(BALL_GEO, BALL_MAT);
     m.scale.setScalar(d / 2); m.castShadow = true;

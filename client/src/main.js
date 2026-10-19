@@ -17,7 +17,7 @@ import {
     refreshModal, promptEl, promptTxtEl, showGoal, animateCounters,
 } from './ui.js';
 import {
-    CFG, STAGES, soccerById, auraById, KITS, SKINS, maxSpeedFor, fmt, clamp,
+    CFG, STAGES, TREADMILLS, TREAD_GEO, soccerById, auraById, KITS, SKINS, maxSpeedFor, fmt, clamp,
 } from '../../shared/config.js';
 
 // =====================================================================================
@@ -156,6 +156,20 @@ function teleport(pos, yaw) {
     sendMove(true);
 }
 function teleportLobby() { P.stage = -1; teleport(SPAWN, 0); }
+
+// Auto Train: stand on the best unlocked treadmill and keep running while AFK
+let autoTrain = false;
+function setAutoTrain(on) {
+    autoTrain = on;
+    $('#btnAuto').classList.toggle('on', on);
+    if (!on) return;
+    let best = -1;
+    TREADMILLS.forEach((d, i) => { if (!treadLocked(d) && (best < 0 || d.mult > TREADMILLS[best].mult)) best = i; });
+    P.stage = -1;
+    teleport(new V3(TREAD_GEO.cx, TREAD_GEO.top + 0.7, TREAD_GEO.z0 + best * TREAD_GEO.step), Math.PI / 2);
+    toast('Auto Train ON - x' + TREADMILLS[best].mult + ' treadmill', '#c28cff');
+}
+$('#btnAuto').addEventListener('click', () => { if (running) setAutoTrain(!autoTrain); });
 
 function die() {
     if (P.dead || P.shield > 0) return;
@@ -384,9 +398,26 @@ let lastEndpoint = '';
 async function serverEndpoint() {
     if (!BLOXITY_GAME_ID) { lastEndpoint = SERVER_URL; return SERVER_URL; }
     const r = await BX.resolveEndpoint(BLOXITY_GAME_ID, DEV_CHANNEL ? 'preview' : undefined);
-    if (r && r.cold) $('#loading').textContent = 'Waking up a server…';
     lastEndpoint = (r && r.endpoint) || SERVER_URL;
+    // A scaled-to-zero server takes a while to boot: wait until it answers before joining
+    if (!(await serverUp(lastEndpoint))) {
+        $('#loading').textContent = 'Waking up a server…';
+        const until = Date.now() + 60000;
+        while (Date.now() < until && !(await serverUp(lastEndpoint))) await new Promise((res) => setTimeout(res, 2000));
+    }
     return lastEndpoint;
+}
+async function serverUp(url) {
+    // The Bloxity matchmaker hands back a wss:// room proxy (wss://play.bloxity.io/v1/ws/<room>):
+    // it has no /health and fetch() cannot open it, so let Colyseus join through it directly
+    if (!/^https?:/i.test(url)) return true;
+    try {
+        const ctl = new AbortController();
+        const t = setTimeout(() => ctl.abort(), 4000);
+        const r = await fetch(url.replace(/\/$/, '') + '/health', { signal: ctl.signal, cache: 'no-store' });
+        clearTimeout(t);
+        return r.ok;
+    } catch (e) { return false; }
 }
 let lastMoveSent = 0, lastMoveKey = '';
 function sendMove(force) {
@@ -704,7 +735,11 @@ function update(dt) {
     mv.set(0, 0, 0).addScaledVector(tmpF, f).addScaledVector(tmpR, r);
     if (mv.lengthSq() > 1) mv.normalize();
     if (P.dead) mv.set(0, 0, 0);
-    P.moving = mv.lengthSq() > 0.01;
+    // Any movement input hands control back to the player
+    if (autoTrain && (f || r)) { setAutoTrain(false); toast('Auto Train OFF', '#c28cff'); }
+    const tread = P.onGround && P.ground && P.ground.tread;
+    const training = autoTrain && !P.dead && tread && !treadLocked(tread);
+    P.moving = mv.lengthSq() > 0.01 || !!training;
 
     const wantSprint = keys.ShiftLeft || keys.ShiftRight || touchSprint || pad.sprint;
     P.sprinting = wantSprint && P.moving && P.stamina > 0;
@@ -727,7 +762,7 @@ function update(dt) {
         const accel = P.onGround ? (P.moving ? 14 : 20) : 6;
         P.hv.lerp(tmpF.set(mv.x * ws, 0, mv.z * ws), 1 - Math.exp(-accel * dt));
         let vx = P.hv.x + P.push.x, vz = P.hv.z + P.push.z;
-        if (P.onGround && P.ground && P.ground.belt) { vx += P.ground.belt.x; vz += P.ground.belt.z; }
+        if (P.onGround && P.ground && P.ground.belt && !training) { vx += P.ground.belt.x; vz += P.ground.belt.z; }
         const dist = Math.max(Math.abs(vx), Math.abs(vz), Math.abs(P.vel.y)) * dt;
         const n = Math.max(1, Math.ceil(dist / 0.6));
         const sdt = dt / n;
@@ -753,7 +788,8 @@ function update(dt) {
             }
             P.airTime = 0;
         } else P.airTime += dt;
-        if (P.moving) P.facing = lerpAngle(P.facing, Math.atan2(mv.x, mv.z), 1 - Math.exp(-dt * 14));
+        if (training) P.facing = lerpAngle(P.facing, Math.PI / 2, 1 - Math.exp(-dt * 14));
+        else if (P.moving) P.facing = lerpAngle(P.facing, Math.atan2(mv.x, mv.z), 1 - Math.exp(-dt * 14));
 
         if (P.shield > 0) P.shield -= dt;
         if (P.pos.y < CFG.voidY) { P.shield = 0; die(); }
@@ -814,18 +850,19 @@ function update(dt) {
     rig.position.copy(P.pos);
     rig.rotation.order = 'YXZ';
     rig.rotation.y = P.facing;
-    if (!reduceMotion) {
+    // a Bloxity avatar leans and banks by itself (animator.js); this is for the blocky stand-in
+    if (!reduceMotion && !localAvatar) {
         const spd = Math.hypot(P.hv.x, P.hv.z);
         const turn = lerpAngle(0, P.facing - P.lastFacing, 1) / Math.max(dt, 1e-3);
         P.lean += (Math.min(0.16, spd * 0.0022) * (P.onGround ? 1 : 0.4) - P.lean) * Math.min(1, dt * 8);
         P.bank += (clamp(-turn * 0.035 * Math.min(1, spd / 30), -0.18, 0.18) - P.bank) * Math.min(1, dt * 8);
         rig.rotation.x = P.lean; rig.rotation.z = P.bank;
-    }
+    } else { rig.rotation.x = 0; rig.rotation.z = 0; }
     P.lastFacing = P.facing;
     const hs = P.moving ? walkSpeed() : 0;
     P.animPhase += dt * (P.onGround ? Math.min(18, 4 + hs * 0.2) : 0);
     if (P.onGround) animRig(rig, P.animPhase, P.moving ? 0.9 : 0); else airPose(rig);
-    if (localAvatar) localAvatar.update(dt, { moving: P.moving && P.onGround, air: !P.onGround, speed: hs, t });
+    if (localAvatar) localAvatar.update(dt, { moving: P.moving && P.onGround, air: !P.onGround, vy: P.vel.y, speed: hs, t });
     const stepN = Math.floor(P.animPhase / Math.PI);
     if (P.onGround && P.moving && !P.dead && stepN !== P.lastStep) {
         sfx('step');
@@ -836,7 +873,8 @@ function update(dt) {
     P.squashV += (1 - P.squash) * 180 * dt;
     P.squashV *= Math.exp(-12 * dt);
     P.squash = clamp(P.squash + P.squashV * dt, 0.7, 1.3);
-    rig.scale.set(1 / Math.sqrt(P.squash), P.squash, 1 / Math.sqrt(P.squash));
+    const sq = localAvatar ? 1 : P.squash; // the avatar's own landing crouch replaces the squash
+    rig.scale.set(1 / Math.sqrt(sq), sq, 1 / Math.sqrt(sq));
     setSpeedLines(!P.dead && P.moving && (P.sprinting || hs > 60) && !reduceMotion ? (P.sprinting ? 1 : 0.5) : 0, dt);
     rig.visible = !P.dead && (P.shield <= 0 || Math.floor(t * 12) % 2 === 0);
     updateAuraFx(auraFx, auraById[S.aura], t);
@@ -856,7 +894,7 @@ function update(dt) {
 // =====================================================================================
 // Boot
 // =====================================================================================
-let lastFrame = 0, loadingSignaled = false, fpsAcc = 0, fpsFrames = 0, showFps = false;
+let frameErrors = 0, lastFrame = 0, loadingSignaled = false, fpsAcc = 0, fpsFrames = 0, showFps = false;
 function frame(now) {
     const dt = Math.min(0.05, (now - (lastFrame || now)) / 1000);
     fpsAcc += (now - (lastFrame || now)) / 1000; fpsFrames++;
@@ -867,12 +905,15 @@ function frame(now) {
         loadingSignaled = true;
         BX.triggerAllSettings();
     }
-    pollGamepad();
-    padButtons();
-    if (running) { update(dt); updateSprintHint(); }
-    else { beltTex.offset.x = (beltTex.offset.x + dt * 0.75) % 1; updateSlabs(now / 1000); }
-    updateCamera(dt);
-    render();
+    // one bad frame (a broken avatar item, say) must never stop the game: log it and keep going
+    try {
+        pollGamepad();
+        padButtons();
+        if (running) { update(dt); updateSprintHint(); }
+        else { beltTex.offset.x = (beltTex.offset.x + dt * 0.75) % 1; updateSlabs(now / 1000); }
+        updateCamera(dt);
+        render();
+    } catch (e) { if (frameErrors++ < 5) console.error('frame error', e); }
     requestAnimationFrame(frame);
 }
 
@@ -890,7 +931,16 @@ async function play() {
     try {
         await waitForLogin(1500);
         const saved = (storageGet('sfs_name') || '').slice(0, 20);
-        const room = await connect(BX.identity().loggedIn ? '' : saved);
+        // A hosted server can be asleep or still starting: retry a few times before giving up
+        let room = null;
+        for (let attempt = 0; !room; attempt++) {
+            try { room = await connect(BX.identity().loggedIn ? '' : saved); } catch (e) {
+                if (attempt >= 4) throw e;
+                console.warn('[join] attempt', attempt + 1, 'failed:', e && e.message);
+                $('#loading').textContent = 'Waking up a server…';
+                await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
+            }
+        }
         const me = room.state.players && room.state.players.get(room.sessionId);
         S.name = me ? me.name : S.name;
     } catch (e) {
