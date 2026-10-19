@@ -5,6 +5,7 @@ import {
 import { S, actions } from './state.js';
 import { lavaMaterial, brickMaterial, bannerMaterial } from './textures.js';
 import { emitTread, bubble } from './fx.js';
+import { batchStatic, skinRig } from './batch.js';
 import {
     CFG, LOBBY, STAGES, TREADMILLS, TREAD_GEO, PORTALS, PRODUCTS, PASSES, SOCCER, RARITY, fmt, sci, clamp, rngFrom, buxText,
 } from '../../shared/config.js';
@@ -43,6 +44,7 @@ function goalWithKeeper(pos, face, keeperDef) {
     const net = new T.Mesh(UNIT, mat(0xffffff, { opacity: 0.35 })); net.scale.set(14, 7, 0.2); net.position.set(0, 3.5, -5); g.add(net);
     const k = buildRig(keeperDef); armsUp(k); k.position.set(0, 0, -1); g.add(k);
     football(2.2, g).position.set(0, 8.6, -1);
+    skinRig(g);
     const w = new V3(); g.updateMatrixWorld(true);
     for (const sx of [-7, 7]) { g.localToWorld(w.set(sx, 0, 0)); solids.push(aabb(w.x, 3.5, w.z, 0.8, 7, 0.8)); }
 }
@@ -132,7 +134,7 @@ function buildPedestal(d, pos, face) {
     box(7.8, 0.5, 8.8, pos.x, pos.y + 0.25, pos.z, 0xeb8c1e, { decor: true });
     box(7, 1, 8, pos.x, pos.y + 0.6, pos.z, LC.pedestal);
     const ring = new T.Mesh(new T.CylinderGeometry(3.3, 3.3, 0.1, 40), mat(glow, { neon: true }));
-    ring.position.set(pos.x, pos.y + 1.12, pos.z); scene.add(ring);
+    ring.position.set(pos.x, pos.y + 1.12, pos.z); ring.matrixAutoUpdate = false; ring.updateMatrix(); scene.add(ring);
     const colMat = new T.MeshBasicMaterial({ map: columnTex, color: glow, transparent: true, opacity: 0.6, depthWrite: false, side: T.DoubleSide, blending: T.AdditiveBlending, toneMapped: false });
     const col = new T.Mesh(new T.CylinderGeometry(3.1, 3.1, 9, 32, 1, true), colMat);
     col.position.set(pos.x, pos.y + 5.6, pos.z); scene.add(col);
@@ -141,6 +143,7 @@ function buildPedestal(d, pos, face) {
     rig.position.set(pos.x, pos.y + 1.1, pos.z);
     rig.rotation.y = Math.atan2(face.x, face.z);
     scene.add(rig);
+    skinRig(rig);
     const bubbleAt = new V3(pos.x, pos.y + 1.2, pos.z);
     let acc = Math.random();
     const phase = Math.random() * 6;
@@ -314,7 +317,7 @@ function buildLobby() {
     const pad = new T.Mesh(new T.CylinderGeometry(6, 6, 0.4, 32), mat(0xffd028, { neon: true }));
     pad.position.set(bp.x, 0.2, bp.z); scene.add(pad);
     const statue = buildRig(GOLD); statue.position.set(bp.x, 0.4, bp.z);
-    statue.rotation.y = Math.atan2(-bp.x, -bp.z); statue.scale.setScalar(1.3); armsUp(statue); scene.add(statue);
+    statue.rotation.y = Math.atan2(-bp.x, -bp.z); statue.scale.setScalar(1.3); armsUp(statue); scene.add(statue); skinRig(statue);
     billboard([{ t: 'SPEED BOOST', c: '#ffd028', s: '#16121f', px: 76 }, { t: 'x2 Speed for 15 min', c: '#ffffff', s: '#16121f', px: 48 }, { t: buxText(PRODUCTS.SpeedBoost.price), c: '#ffd23a', s: '#16121f', px: 52 }], 14, 512, new V3(bp.x, 13, bp.z));
     const btr = aabb(bp.x, 3.5, bp.z, 12, 7, 12);
     btr.enter = () => actions.buy('product', 'SpeedBoost');
@@ -337,7 +340,7 @@ function buildLobby() {
 const SPIKE_GEO = new T.ConeGeometry(1.5, 4, 8);
 function spike(x, y, z) {
     const m = new T.Mesh(SPIKE_GEO, mat(CC.spike));
-    m.position.set(x, y + 2, z); m.castShadow = true; scene.add(m);
+    m.position.set(x, y + 2, z); m.castShadow = true; m.matrixAutoUpdate = false; m.updateMatrix(); scene.add(m);
     const k = aabb(x, y + 1.5, z, 2, 3, 2); k.active = true; kills.push(k);
 }
 function texturedBox(sx, sy, sz, x, y, z, material) {
@@ -366,6 +369,7 @@ function addPickup(stageIdx, x, y, z, amount) {
     const glow = new T.Mesh(new T.CylinderGeometry(1.8, 1.8, 0.1, 20), mat(0x6fe0ff, { neon: true, opacity: 0.45 })); glow.position.y = -1.3; g.add(glow);
     g.position.set(x, y + 1.8, z);
     scene.add(g);
+    skinRig(g);
     const id = stageIdx + ':' + pickups.filter((p) => p.stage === stageIdx).length;
     pickups.push({ id, stage: stageIdx, g, base: y + 1.8, amount, respawnAt: 0, phase: Math.random() * 6 });
 }
@@ -382,7 +386,7 @@ function stageSigns(s) {
 }
 function returnPad(stageIdx, x, z, wins, finish) {
     const pad = new T.Mesh(new T.CylinderGeometry(5, 5, 0.4, 32), mat(finish ? CC.purple : CC.yellow, { neon: true }));
-    pad.position.set(x, 0.2, z); scene.add(pad);
+    pad.position.set(x, 0.2, z); pad.matrixAutoUpdate = false; pad.updateMatrix(); scene.add(pad);
     billboard([{ t: '+' + wins + ' Wins', c: '#ffd028', s: '#16121f', px: 80 }, { t: finish ? 'FINISH!' : 'Return to lobby', c: '#ffffff', s: '#16121f', px: 46 }], 10, 512, new V3(x, 8, z));
     const tr = aabb(x, 3, z, 10, 6, 10);
     tr.enter = () => actions.pad(stageIdx);
@@ -390,7 +394,7 @@ function returnPad(stageIdx, x, z, wins, finish) {
 }
 function doubleWinsPad(x, z) {
     const pad = new T.Mesh(new T.CylinderGeometry(4, 4, 0.4, 32), mat(CC.purple, { neon: true }));
-    pad.position.set(x, 0.2, z); scene.add(pad);
+    pad.position.set(x, 0.2, z); pad.matrixAutoUpdate = false; pad.updateMatrix(); scene.add(pad);
     billboard([{ t: 'x2 Wins', c: '#e27bff', s: '#16121f', px: 80 }, { t: buxText(PASSES.DoubleWins.price), c: '#ffd23a', s: '#16121f', px: 50 }], 8, 512, new V3(x, 7, z));
     const tr = aabb(x, 3, z, 8, 6, 8);
     tr.enter = () => actions.buy('pass', 'DoubleWins');
@@ -497,6 +501,7 @@ function buildCourse() {
                 const banner = new T.Mesh(new T.PlaneGeometry(5, 12.5), bannerMaterial((z / 40) % 2 ? ['#d71e2d', '#8c0f1a'] : ['#1e46c8', '#0f2470'], (z / 40) % 2 ? 'GOAL' : 'RUN!'));
                 banner.position.set(sx * (W / 2 - 0.05), 30, z + 10);
                 banner.rotation.y = -sx * Math.PI / 2;
+                banner.matrixAutoUpdate = false; banner.updateMatrix();
                 scene.add(banner);
             }
         }
@@ -618,4 +623,7 @@ export function buildWorld() {
     buildLobby();
     buildCourse();
     refreshShop();
+    // every box that never moves drawn together with the others of its colour (a few dozen draw
+    // calls instead of well over a thousand)
+    batchStatic(scene);
 }

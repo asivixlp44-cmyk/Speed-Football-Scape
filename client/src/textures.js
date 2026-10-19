@@ -81,6 +81,8 @@ export function lavaMaterial(rx, ry) {
     if (cache.has(id)) return cache.get(id);
     const m = new T.MeshBasicMaterial({ map: repeated(lavaImg, 'lava', rx, ry) });
     animated.push(m.map);
+    // merged into the world, the lava's shared texture scrolls the same way
+    m.map.userData.onBatch = (tex) => animated.push(tex);
     cache.set(id, m);
     return m;
 }
@@ -108,7 +110,8 @@ export function bannerMaterial(bg, word) {
     x.font = '700 40px Fredoka, sans-serif'; x.fillStyle = '#ffffff';
     x.lineWidth = 6; x.strokeStyle = 'rgba(0,0,0,0.45)';
     [...word].forEach((ch, i) => { x.strokeText(ch, 64, 130 + i * 40); x.fillText(ch, 64, 130 + i * 40); });
-    const m = new T.MeshLambertMaterial({ map: texFrom(c), transparent: true, side: T.DoubleSide });
+    // cut out (not blended), so the banners are drawn with the solid world and merge with it
+    const m = new T.MeshLambertMaterial({ map: texFrom(c), alphaTest: 0.5, side: T.DoubleSide });
     cache.set(id, m);
     return m;
 }
